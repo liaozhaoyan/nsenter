@@ -133,7 +133,6 @@ int luaopen_nsenter(lua_State *L) {
 #if LUA_VERSION_NUM > 501
     luaL_newlib(L, module_f);
 #else
-    /* lua5.1 根据luaL_newlib函数，我们可以明白这里的"hello"参数并没有多大用 */
     luaL_register(L, "nsenter", module_f);
 #endif
     return 1;
