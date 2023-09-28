@@ -5,6 +5,7 @@
 #include <lua.h>
 #include <lauxlib.h>
 
+#define _GNU_SOURCE             /* See feature_test_macros(7) */
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,11 +13,7 @@
 #include <errno.h>
 #include <unistd.h>
 #include <limits.h>
-#include <linux/sched.h>
-
-#define register_constant(L, s)\
-    lua_pushinteger(L, s);\
-    lua_setfield(L, -2, #s);
+#include <sched.h>
 
 #define MT_NAME "NSENTER_HANDLE"
 
