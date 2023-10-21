@@ -17,84 +17,93 @@
 
 #define MT_NAME "NSENTER_HANDLE"
 
+#define NS_NUM  8
+struct ns_manager {
+    int count;
+    int host_fd[NS_NUM];
+    int ns_fd[NS_NUM];
+};
+
 static int nsenter(lua_State *L) {
-    char path[PATH_MAX];
     int ret;
     pid_t self = getpid();
+    int i;
+    int top = lua_gettop(L);
 
-    int *priv = (int *)luaL_checkudata(L, 1, MT_NAME);
-    pid_t pid  = luaL_checkint(L, 2);
-    const char *ns = luaL_checkstring(L, 3);
-    int fd, fd_self;
+    if (top <= 2 || top > 2 + NS_NUM) {
+        luaL_error(L, "entry arg failed, try ns:nsenter(pid, 'mnt', 'pid')");
+    }
 
-    if (*(priv) != 0) {
+    struct ns_manager *priv = (struct ns_manager *)luaL_checkudata(L, 1, MT_NAME);
+    if (priv->count != 0) {
         luaL_error(L, "current namespace is not exit.");
     }
+    priv->count = top - 2;
 
-    snprintf(path, PATH_MAX, "/proc/%d/ns/%s", pid, ns);
-    fd = open(path, O_RDONLY);
-    if (fd == -1) {
-        ret = errno;
-        luaL_error(L, "pid %d fd open failed, errno:%d, %s\n", pid,
-                errno, strerror(errno));
-        goto endOpen;
+    pid_t pid  = luaL_checkint(L, 2);
+    for (i = 0; i < priv->count; i ++) {
+        int fd, fd_self;
+        char path[PATH_MAX];
+        const char *ns = luaL_checkstring(L, i + 3);
+
+        snprintf(path, PATH_MAX, "/proc/%d/ns/%s", pid, ns);
+        fd = open(path, O_RDONLY);
+        if (fd == -1) {
+            ret = errno;
+            luaL_error(L, "pid %d fd open failed, errno:%d, %s\n", pid,
+                       errno, strerror(errno));
+        }
+        priv->ns_fd[i] = fd;
+
+        snprintf(path, PATH_MAX, "/proc/%d/ns/%s", self, ns);
+        fd_self = open(path, O_RDONLY);
+        if (fd == -1) {
+            ret = errno;
+            luaL_error(L, "self pid fd open failed, errno:%d, %s\n",
+                       errno, strerror(errno));
+        }
+        priv->host_fd[i] = fd_self;
     }
+    lua_pop(L, -1);  // clear stack
 
-    snprintf(path, PATH_MAX, "/proc/%d/ns/%s", self, ns);
-    fd_self = open(path, O_RDONLY);
-    if (fd == -1) {
-        ret = errno;
-        luaL_error(L, "self pid fd open failed, errno:%d, %s\n",
-                errno, strerror(errno));
-        goto endOpenself;
+    for (i = 0; i < priv->count; i ++) {
+        ret = setns(priv->ns_fd[i], 0);
+        if (ret < 0) {
+            luaL_error(L, "set ns failed, errno:%d, %s\n",
+                       errno, strerror(errno));
+        }
     }
-
-    ret = setns(fd, 0);
-    if (ret < 0) {
-        goto endSetns;
-    }
-
-    *(priv + 0) = fd;
-    *(priv + 1) = fd_self;
-    lua_pushnumber(L, ret);
-    return 1;
-
-    endSetns:
-    close(fd_self);
-    endOpenself:
-    close(fd);
-    endOpen:
     lua_pushnumber(L, ret);
     return 1;
 }
 
 static int nsexit(lua_State *L) {
-    int *priv = (int *)luaL_checkudata(L, 1, MT_NAME);
-    int fd, fd_self;
+    int i, fd;
+    struct ns_manager *priv = (struct ns_manager *)luaL_checkudata(L, 1, MT_NAME);
 
-    luaL_argcheck(L, priv != NULL, 1, "`array' expected");
-    fd = *(priv);
-    if (fd > 0) {
-        close(fd);
+    luaL_argcheck(L, priv != NULL, 1, "bad self.");
+
+    for (i = 0; i < priv->count; i ++) {
+        fd = priv->ns_fd[i];
+        if (fd > 0) {
+            close(fd);
+        }
+
+        fd = priv->host_fd[i];
+        if (fd > 0) {
+            setns(fd, 0);
+            close(fd);
+        }
     }
-
-    fd_self = *(priv + 1);
-    if (fd_self > 0) {
-        setns(fd_self, 0);
-        close(fd_self);
-    }
-
-    *(priv) = 0;
-    *(priv + 1) = 0;
+    memset(priv, 0, sizeof(struct ns_manager));
     return 0;
 }
 
 static int new(lua_State *L) {
-    size_t nbytes = sizeof(int) * 2;
+    size_t nbytes = sizeof(struct ns_manager);
 
-    int *priv = (int *)lua_newuserdata(L, nbytes);
-    *(priv ++) = 0;
-    *(priv ++) = 0;
+    struct ns_manager *priv = (struct ns_manager *)lua_newuserdata(L, nbytes);
+    priv->count = 0;
 
     luaL_getmetatable(L, MT_NAME);
     lua_setmetatable(L, -2);
