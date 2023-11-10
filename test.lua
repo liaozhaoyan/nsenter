@@ -14,3 +14,8 @@ print(os.execute("ifconfig"))
 print(os.execute("ps axu"))
 ns:exit()
 print(os.execute("ifconfig"))
+
+ns:enter(58834, "pid", "net", "mnt")
+print(os.execute("ifconfig"))
+print(os.execute("ps axu"))
+ns:exit()

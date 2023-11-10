@@ -26,7 +26,6 @@ struct ns_manager {
 
 static int nsenter(lua_State *L) {
     int ret;
-    pid_t self = getpid();
     int i;
     int top = lua_gettop(L);
 
@@ -55,7 +54,7 @@ static int nsenter(lua_State *L) {
         }
         priv->ns_fd[i] = fd;
 
-        snprintf(path, PATH_MAX, "/proc/%d/ns/%s", self, ns);
+        snprintf(path, PATH_MAX, "/proc/self/ns/%s", ns);
         fd_self = open(path, O_RDONLY);
         if (fd == -1) {
             ret = errno;
@@ -64,7 +63,6 @@ static int nsenter(lua_State *L) {
         }
         priv->host_fd[i] = fd_self;
     }
-    lua_pop(L, -1);  // clear stack
 
     for (i = 0; i < priv->count; i ++) {
         ret = setns(priv->ns_fd[i], 0);
@@ -78,20 +76,20 @@ static int nsenter(lua_State *L) {
 }
 
 static int nsexit(lua_State *L) {
-    int i, fd;
+    int i, fd, host_fd;
     struct ns_manager *priv = (struct ns_manager *)luaL_checkudata(L, 1, MT_NAME);
 
     luaL_argcheck(L, priv != NULL, 1, "bad self.");
 
     for (i = 0; i < priv->count; i ++) {
-        fd = priv->ns_fd[i];
-        if (fd > 0) {
-            close(fd);
+        host_fd = priv->host_fd[i];
+        if (host_fd > 0) {
+            setns(host_fd, 0);
+            close(host_fd);
         }
 
-        fd = priv->host_fd[i];
+        fd = priv->ns_fd[i];
         if (fd > 0) {
-            setns(fd, 0);
             close(fd);
         }
     }
