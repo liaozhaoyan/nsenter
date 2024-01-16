@@ -24,6 +24,17 @@ struct ns_manager {
     int ns_fd[NS_NUM];
 };
 
+static void escape_ch(struct ns_manager *priv, int fdNs, int fdSelf ) {
+    int i;
+    for (i = 0; i < fdNs; i ++) {
+        close(priv->ns_fd[i]);
+    }
+
+    for (i = 0; i < fdSelf; i ++) {
+        close(priv->host_fd[i]);
+    }
+}
+
 static int nsenter(lua_State *L) {
     int ret;
     int i;
@@ -34,6 +45,7 @@ static int nsenter(lua_State *L) {
     }
 
     struct ns_manager *priv = (struct ns_manager *)luaL_checkudata(L, 1, MT_NAME);
+    luaL_argcheck(L, priv != NULL, 1, "bad self.");
     if (priv->count != 0) {
         luaL_error(L, "current namespace is not exit.");
     }
@@ -49,6 +61,7 @@ static int nsenter(lua_State *L) {
         fd = open(path, O_RDONLY);
         if (fd == -1) {
             ret = errno;
+            escape_ch(priv, i, i);
             luaL_error(L, "pid %d fd open failed, errno:%d, %s\n", pid,
                        errno, strerror(errno));
         }
@@ -58,6 +71,7 @@ static int nsenter(lua_State *L) {
         fd_self = open(path, O_RDONLY);
         if (fd == -1) {
             ret = errno;
+            escape_ch(priv, i + 1, i);
             luaL_error(L, "self pid fd open failed, errno:%d, %s\n",
                        errno, strerror(errno));
         }
@@ -67,9 +81,17 @@ static int nsenter(lua_State *L) {
     for (i = 0; i < priv->count; i ++) {
         ret = setns(priv->ns_fd[i], 0);
         if (ret < 0) {
+            int j;
+            for (j = i; j < priv->count; j ++) {
+                close(priv->ns_fd[j]);
+            }
+            escape_ch(priv, 0, priv->count);
             luaL_error(L, "set ns failed, errno:%d, %s\n",
                        errno, strerror(errno));
         }
+
+        close(priv->ns_fd[i]);  // if setns success, the fd can closed.
+        priv->ns_fd[i] = 0;
     }
     lua_pushnumber(L, ret);
     return 1;
@@ -78,7 +100,6 @@ static int nsenter(lua_State *L) {
 static int nsexit(lua_State *L) {
     int i, fd, host_fd;
     struct ns_manager *priv = (struct ns_manager *)luaL_checkudata(L, 1, MT_NAME);
-
     luaL_argcheck(L, priv != NULL, 1, "bad self.");
 
     for (i = 0; i < priv->count; i ++) {
@@ -87,13 +108,31 @@ static int nsexit(lua_State *L) {
             setns(host_fd, 0);
             close(host_fd);
         }
-
-        fd = priv->ns_fd[i];
-        if (fd > 0) {
-            close(fd);
-        }
     }
     memset(priv, 0, sizeof(struct ns_manager));
+    return 0;
+}
+
+static int l_setns(lua_State *L) {
+    int fd, ret;
+    const char *path;
+    struct ns_manager *priv = (struct ns_manager *)luaL_checkudata(L, 1, MT_NAME);
+    luaL_argcheck(L, priv != NULL, 1, "bad self.");
+
+    path = luaL_checkstring(L, 2);
+    fd = open(path, O_RDONLY);
+    if (fd < 0) {
+        luaL_error(L, "%s open failed, errno:%d, %s\n", path,
+                   errno, strerror(errno));
+    }
+
+    ret = setns(fd, 0);
+    if (ret < 0) {
+        close(fd);
+        luaL_error(L, "set ns failed, errno:%d, %s\n",
+                   errno, strerror(errno));
+    }
+    close(fd);
     return 0;
 }
 
@@ -112,6 +151,7 @@ static int new(lua_State *L) {
 static luaL_Reg module_m[] = {
         {"enter", nsenter},
         {"exit", nsexit},
+        {"setns", l_setns},
         {NULL, NULL}
 };
 
