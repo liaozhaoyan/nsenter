@@ -1,5 +1,5 @@
 package = "nsenter"
-version = "1.0-3"
+version = "1.0-4"
 source = {
     url = "git://github.com/liaozhaoyan/nsenter",
 }
